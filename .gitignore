@@ -1,0 +1,53 @@
+# Dependencies
+node_modules/
+backend/venv/
+backend/.venv/      # sometimes virtualenvs get named .venv
+
+# Production builds
+frontend/build/
+backend/dist/
+backend/__pycache__/
+
+# Environment variables
+.env
+.env.*
+frontend/.env*
+backend/.env*
+
+# Database (local dev files)
+*.db
+*.sqlite3
+*.json
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.Python
+*.egg-info/
+.eggs/
+.mypy_cache/        # type checker
+.pytest_cache/      # pytest cache
+.coverage
+htmlcov/
+
+# Frontend (React)
+frontend/.next/     # if using Next.js at some point
+frontend/.turbo/    # turbo repo cache
+
+# IDEs & Editors
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
