@@ -7,7 +7,10 @@ interface Game {
   id: string;
   white: string;
   black: string;
-  result: string;
+  result: string;               // normalized result: '1-0' | '0-1' | '1/2-1/2' | 'unknown'
+  raw_result?: string;         // any raw result/status string from API or PGN
+  white_result?: string;       // Chess.com style: game.white.result (e.g. 'win','resigned', etc.)
+  black_result?: string;       // Chess.com style: game.black.result
   time_control: string;
   end_time: number;
   url: string;
@@ -20,6 +23,7 @@ interface Game {
   termination?: string;
   opening_name?: string;
   moves?: string[];
+  winner?: 'white' | 'black' | 'draw' | 'unknown';
 }
 
 interface GameAnalysisProps {
@@ -135,31 +139,79 @@ export function GameAnalysis({ user, token }: GameAnalysisProps) {
 
   const processGamesData = (rawGames: any[], username: string): Game[] => {
     return rawGames.map((game, index) => {
-      // Handle both string and object formats for white/black
-      const whiteName = typeof game.white === 'string' ? game.white : game.white?.username || 'Unknown';
-      const blackName = typeof game.black === 'string' ? game.black : game.black?.username || 'Unknown';
-      
+      // Normalize names
+      const whiteName =
+        typeof game.white === 'string'
+          ? game.white
+          : (game.white && (game.white.username || game.white.user?.name)) || 'Unknown';
+      const blackName =
+        typeof game.black === 'string'
+          ? game.black
+          : (game.black && (game.black.username || game.black.user?.name)) || 'Unknown';
+  
       const isUserWhite = whiteName.toLowerCase() === username.toLowerCase();
       const userColor = isUserWhite ? 'white' : 'black';
-      
+  
+      // Try to get Chess.com style results from game.white.result / game.black.result
+      const whiteRes =
+        typeof game.white === 'object' && game.white?.result
+          ? String(game.white.result).toLowerCase()
+          : (String((game as any).white_result || '')).toLowerCase();
+  
+      const blackRes =
+        typeof game.black === 'object' && game.black?.result
+          ? String(game.black.result).toLowerCase()
+          : (String((game as any).black_result || '')).toLowerCase();
+  
+      // Top-level / PGN fallback
+      const topLevel = String(game.result || game.status || '').toLowerCase();
+      const pgn = game.pgn || '';
+  
+      // Determine winner/draw from multiple sources
+      let winner: 'white' | 'black' | 'draw' | 'unknown' = 'unknown';
+  
+      // Check PGN tag if available
+      const pgnResultMatch = (pgn.match(/\[Result "([^"]+)"\]/) || [])[1];
+      if (pgnResultMatch === '1-0') winner = 'white';
+      else if (pgnResultMatch === '0-1') winner = 'black';
+      else if (pgnResultMatch === '1/2-1/2') winner = 'draw';
+  
+      // If still unknown, check chess.com style fields
+      if (winner === 'unknown') {
+        if (whiteRes && (whiteRes === 'win' || whiteRes.includes('win'))) winner = 'white';
+        else if (blackRes && (blackRes === 'win' || blackRes.includes('win'))) winner = 'black';
+        else {
+          // top-level fields (lichess) or result strings like '1-0'
+          if (topLevel.includes('1-0')) winner = 'white';
+          else if (topLevel.includes('0-1')) winner = 'black';
+          else if (topLevel.includes('draw') || topLevel.includes('stalemate') || topLevel.includes('agreement') || topLevel === '1/2-1/2') winner = 'draw';
+        }
+      }
+  
+      const normalizedResult = winner === 'white' ? '1-0' : winner === 'black' ? '0-1' : winner === 'draw' ? '1/2-1/2' : 'unknown';
+  
       return {
         id: game.id || game.uuid || `game_${index}`,
         white: whiteName,
         black: blackName,
-        result: game.result || 'unknown',
+        result: normalizedResult,
+        raw_result: topLevel || '',
+        white_result: whiteRes || '',
+        black_result: blackRes || '',
         time_control: game.time_control || '0',
-        end_time: game.end_time || Date.now() / 1000,
+        end_time: game.end_time || Math.floor(Date.now() / 1000),
         url: game.url || '',
-        pgn: game.pgn,
+        pgn: pgn || '',
         time_class: game.time_class || classifyTimeControl(game.time_control),
-        eco: extractECOFromPGN(game.pgn) || game.eco,
-        white_rating: (typeof game.white === 'object' ? game.white?.rating : 0) || 0,
-        black_rating: (typeof game.black === 'object' ? game.black?.rating : 0) || 0,
+        eco: extractECOFromPGN(pgn) || game.eco || '',
+        white_rating: (typeof game.white === 'object' ? (game.white?.rating || game.white?.user?.rating) : (game.white_rating || 0)) || 0,
+        black_rating: (typeof game.black === 'object' ? (game.black?.rating || game.black?.user?.rating) : (game.black_rating || 0)) || 0,
         user_color: userColor,
-        termination: extractTerminationFromPGN(game.pgn),
-        opening_name: extractOpeningFromPGN(game.pgn),
-        moves: extractMovesFromPGN(game.pgn)
-      };
+        termination: extractTerminationFromPGN(pgn),
+        opening_name: extractOpeningFromPGN(pgn),
+        moves: extractMovesFromPGN(pgn),
+        winner: winner
+      } as Game;
     });
   };
 
@@ -236,14 +288,9 @@ export function GameAnalysis({ user, token }: GameAnalysisProps) {
 
     if (filters.result !== 'all') {
       filtered = filtered.filter(game => {
-        const userWon = (game.user_color === 'white' && game.result === 'win') ||
-                       (game.user_color === 'black' && game.result === 'win');
-        const userLost = (game.user_color === 'white' && (game.result === 'resigned' || game.result === 'checkmated')) ||
-                        (game.user_color === 'black' && (game.result === 'resigned' || game.result === 'checkmated'));
-        
-        if (filters.result === 'wins') return userWon;
-        if (filters.result === 'losses') return userLost;
-        if (filters.result === 'draws') return game.result.includes('draw') || game.result.includes('stalemate');
+        if (filters.result === 'wins') return (game.user_color === 'white' && game.result === '1-0') || (game.user_color === 'black' && game.result === '0-1');
+        if (filters.result === 'losses') return (game.user_color === 'white' && game.result === '0-1') || (game.user_color === 'black' && game.result === '1-0');
+        if (filters.result === 'draws') return game.result === '1/2-1/2';
         return true;
       });
     }
@@ -266,22 +313,12 @@ export function GameAnalysis({ user, token }: GameAnalysisProps) {
   };
 
   const getGameStats = () => {
-    const wins = filteredGames.filter(game => 
-      (game.user_color === 'white' && game.result === 'win') ||
-      (game.user_color === 'black' && game.result === 'win')
-    ).length;
-    
-    const losses = filteredGames.filter(game => 
-      (game.user_color === 'white' && (game.result === 'resigned' || game.result === 'checkmated')) ||
-      (game.user_color === 'black' && (game.result === 'resigned' || game.result === 'checkmated'))
-    ).length;
-    
-    const draws = filteredGames.filter(game => 
-      game.result.includes('draw') || game.result.includes('stalemate')
-    ).length;
-
+    const wins = filteredGames.filter(game => game.winner === game.user_color).length;
+    const losses = filteredGames.filter(game => game.winner && game.winner !== game.user_color).length;
+    const draws = filteredGames.filter(game => !game.winner).length;
+  
     const winRate = filteredGames.length > 0 ? ((wins / filteredGames.length) * 100).toFixed(1) : '0';
-
+  
     return { wins, losses, draws, winRate, total: filteredGames.length };
   };
 
@@ -346,13 +383,8 @@ export function GameAnalysis({ user, token }: GameAnalysisProps) {
   };
 
   const getResultIcon = (game: Game) => {
-    const userWon = (game.user_color === 'white' && game.result === 'win') ||
-                   (game.user_color === 'black' && game.result === 'win');
-    const userLost = (game.user_color === 'white' && (game.result === 'resigned' || game.result === 'checkmated')) ||
-                    (game.user_color === 'black' && (game.result === 'resigned' || game.result === 'checkmated'));
-    
-    if (userWon) return { icon: '🟢', text: 'Win' };
-    if (userLost) return { icon: '🔴', text: 'Loss' };
+    if (game.winner === game.user_color) return { icon: '🟢', text: 'Win' };
+    if (game.winner && game.winner !== game.user_color) return { icon: '🔴', text: 'Loss' };
     return { icon: '🟡', text: 'Draw' };
   };
 
