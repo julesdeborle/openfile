@@ -70,10 +70,10 @@ function App() {
   };
 
   const handleLogout = () => {
-    localStorage.removeItem('chess_token');
-    localStorage.removeItem('chess_user');
+      localStorage.removeItem('chess_token');
+      localStorage.removeItem('chess_user');
     localStorage.removeItem('chess_active_tab'); // Clear saved tab on logout
-    setToken(null);
+      setToken(null);
     setUser(null);
     setIsAuthenticated(false);
     setActiveTab('play');
@@ -330,11 +330,14 @@ function App() {
     <div className="app">
       <div className="app-header">
         <div className="header-content">
-          <h1 className="app-title">
-            <span className="chess-icon">♔</span>
-            Chess Learning Platform
-            <span className="chess-icon">♛</span>
-          </h1>
+          <div className="app-title">
+            <img src="/openFile.png" alt="Chess Logo" className="app-logo" />
+            <h1>
+              {/* <span className="chess-icon">♔</span> */}
+              OpenFile
+              {/* <span className="chess-icon">♛</span> */}
+            </h1>
+          </div>
           <div className="header-actions">
             <div className="api-status">
               {apiStatus}
